@@ -1,0 +1,30 @@
+# Python / uv
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+
+# Local config
+.env
+
+# Models live in a volume, not in git
+models/
+*.onnx
+
+# Personal photos: never commit
+orig/
+edited/
+__MACOSX/
+.DS_Store
+*.jpg
+*.JPG
+*.jpeg
+*.JPEG
+*.png
+*.PNG
+
+# IDE
+.idea/
+.vscode/
+*.bundle
