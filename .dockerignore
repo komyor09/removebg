@@ -1,0 +1,27 @@
+# Only requirements.txt and app/ are needed to build the image
+.git
+.idea
+.vscode
+.venv
+venv
+**/__pycache__
+**/*.pyc
+.pytest_cache
+.ruff_cache
+
+.env
+models/
+tests/
+orig/
+edited/
+__MACOSX/
+**/.DS_Store
+*.jpg
+*.JPG
+*.jpeg
+*.JPEG
+*.png
+*.PNG
+removebg.py
+uv.lock
+*.md

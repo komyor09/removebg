@@ -1,0 +1,26 @@
+[project]
+name = "removebg"
+version = "0.1.0"
+description = "Background removal API (rembg, CPU) for internal services"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "fastapi==0.156.8",
+    "uvicorn==0.54.0",
+    "python-multipart==0.0.32",
+    "pydantic-settings==2.16.1",
+    "pillow==12.3.0",
+    "rembg==2.0.85",
+    "onnxruntime==1.31.0",
+]
+
+[dependency-groups]
+dev = [
+    "httpx==0.28.1",
+    "pytest==9.1.1",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 110
