@@ -4,18 +4,21 @@ import io
 import logging
 import os
 import sys
+import tempfile
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from onnxruntime import SessionOptions
 from PIL import Image
 from pydantic import BaseModel
 from rembg import new_session, remove
+from starlette.background import BackgroundTask
 
+from app import batch
 from app.config import get_settings
 from app.images import decode_image, read_upload
 
@@ -101,9 +104,78 @@ async def remove_background(
 ):
     data = await read_upload(file, settings.max_upload_mb)
     image = await run_in_threadpool(decode_image, data, file.filename)
-    bg = tuple(int(bg_color.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)) if bg_color else None
+    bg = _parse_color(bg_color)
     content = await run_in_threadpool(_remove_background, request.app.state.session, image, format, bg)
     return Response(content=content, media_type=f"image/{format}")
+
+
+def _run_batch(uploads: list[UploadFile], out_path: str, session, fmt: str, bg) -> tuple[int, list[str]]:
+    """Plan (limits) + processing, all in one worker thread: reading ZIPs and uploads is blocking I/O."""
+    sources, skipped, zips = batch.plan(
+        uploads, settings.max_upload_mb, settings.max_batch_files, settings.max_batch_mb
+    )
+    try:
+        with open(out_path, "wb") as out:
+            return batch.process(
+                sources, skipped, out, fmt, lambda img, f: _remove_background(session, img, f, bg)
+            )
+    finally:
+        for zf in zips:
+            zf.close()
+
+
+@app.post(
+    "/remove-background/batch",
+    summary="Удалить фон у нескольких фото (папка или ZIP)",
+    description=(
+        "Принимает несколько изображений (содержимое папки), ZIP-архив(ы) или и то и другое. "
+        "Возвращает ZIP с результатами: структура папок сохраняется, расширение меняется на .png/.jpg. "
+        "Файлы, которые не удалось обработать, перечислены в `_errors.txt` внутри архива. "
+        "Заголовки ответа: `X-Processed` — обработано, `X-Failed` — с ошибками/пропущено."
+    ),
+    response_class=FileResponse,
+    responses={
+        200: {"content": {"application/zip": {}}, "description": "ZIP с изображениями без фона"},
+        400: {"description": "Повреждённый ZIP или в загрузке нет изображений"},
+        413: {"description": "Больше MAX_BATCH_FILES изображений или MAX_BATCH_MB всего"},
+        422: {"description": "Ни одно изображение не удалось обработать (список ошибок в detail)"},
+    },
+)
+async def remove_background_batch(
+    request: Request,
+    files: list[UploadFile] = File(
+        ..., description="Изображения (JPG, PNG, WEBP, BMP, TIFF) и/или ZIP-архивы. Папку — все файлы из неё или ZIP"
+    ),
+    format: Literal["png", "jpeg"] = Query("png", description="Как в /remove-background"),
+    bg_color: str | None = Query(None, pattern=r"^#?[0-9A-Fa-f]{6}$", description="Как в /remove-background"),
+):
+    bg = _parse_color(bg_color)
+    fd, out_path = tempfile.mkstemp(suffix=".zip")
+    os.close(fd)
+    try:
+        done, errors = await run_in_threadpool(
+            _run_batch, files, out_path, request.app.state.session, format, bg
+        )
+    except BaseException:
+        os.unlink(out_path)
+        raise
+    log.info("Batch: %d processed, %d failed/skipped", done, len(errors))
+    if not done:
+        os.unlink(out_path)
+        return JSONResponse(status_code=422, content={"detail": errors})
+    zips = [f for f in files if (f.filename or "").lower().endswith(".zip")]
+    stem = Path(zips[0].filename).stem if len(files) == 1 and zips else "removebg"
+    return FileResponse(
+        out_path,
+        media_type="application/zip",
+        filename=f"{stem}_nobg.zip",
+        headers={"X-Processed": str(done), "X-Failed": str(len(errors))},
+        background=BackgroundTask(os.unlink, out_path),
+    )
+
+
+def _parse_color(value: str | None) -> tuple[int, int, int] | None:
+    return tuple(int(value.lstrip("#")[i : i + 2], 16) for i in (0, 2, 4)) if value else None
 
 
 class HealthResponse(BaseModel):

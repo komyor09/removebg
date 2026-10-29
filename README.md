@@ -6,6 +6,8 @@
 ```bash
 curl -F "file=@photo.jpg" -o photo.png http://<сервер>/rembg/remove-background
 curl -F "file=@photo.jpg" -o photo.jpg "http://<сервер>/rembg/remove-background?format=jpeg&bg_color=FFFFFF"
+# Пакетно: ZIP (или несколько файлов) -> ZIP с результатами, структура папок сохраняется
+curl -F "files=@photos.zip" -o photos_nobg.zip http://<сервер>/rembg/remove-background/batch
 ```
 
 Запуск в Docker, переменные окружения, nginx — [DEPLOY.md](DEPLOY.md).
@@ -26,7 +28,8 @@ uv run pytest -q
 
 ```
 app/
-  main.py      FastAPI: lifespan (загрузка модели один раз), /remove-background, /health
+  main.py      FastAPI: lifespan (загрузка модели один раз), /remove-background, /batch, /health
+  batch.py     пакетная обработка: папка / ZIP -> ZIP (лимиты, zip-slip, cp866-имена)
   config.py    настройки из окружения (pydantic-settings)
   images.py    загрузка: лимит размера (413), проверка типа (415), EXIF-поворот
 tests/         проверки загрузки и Swagger (модель не нужна)
